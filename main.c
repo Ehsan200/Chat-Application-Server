@@ -404,7 +404,7 @@ void clientrefreh(){
     while((textjson[n++] = getc(channel)) != EOF);
     textjson[n] = 0;
     fclose(channel);
-    printf("textjson refresh : %s",textjson);
+    ///printf("textjson refresh : %s",textjson);
     cJSON * new = cJSON_Parse(textjson);
     cJSON * membernumber = cJSON_GetObjectItem(new , "membernum");
     cJSON * membername = cJSON_GetObjectItem(new , "members");
@@ -444,11 +444,11 @@ void clientrefreh(){
 void channelmembers(){
     char first[100];
     char second[100];
-    char tokne[50];
+    char token[50];
     char channelname[100];
-    sscanf(buffer , "%s %s %s", first,second ,tokne);
+    sscanf(buffer , "%s %s %s", first,second ,token);
     for(int i = 0 ; i < registeredusers ; i++){
-        if(strcmp(clients[i].token , tokne) == 0){
+        if(strcmp(clients[i].token , token) == 0){
             if(strcmp(clients[i].channelname , "") == 0){
                 cJSON* error = cJSON_CreateObject();
                 cJSON_AddStringToObject(error,"type" , "Error");
@@ -552,6 +552,112 @@ void clientlogout(){
         }
     }
 }
+
+void client_find_user(){
+    char finduser[100];
+    char username[100];
+    char token[100];
+    char channelname[200];
+    sscanf(buffer , "%s %s %s",finduser , username , token);
+    printf("find user token : %s\n",token);
+    for(int i = 0 ; i < registeredusers ; i++){
+        if(strcmp(clients[i].token , token) == 0){
+            if(strcmp(clients[i].channelname , "") == 0){
+                cJSON* error = cJSON_CreateObject();
+                cJSON_AddStringToObject(error,"type" , "Error");
+                cJSON_AddStringToObject(error,"content", "this member are not in any channel");
+                char* string;
+                string = cJSON_Print(error);
+                send(client_socket , string , strlen(string) , 0);
+                return;
+            }
+            else{
+                strcpy(channelname , clients[i].channelname);
+                break;
+            }
+        }
+    }
+    printf("you are in find_users\n");
+    printf("channel name : %s\n",channelname);
+    FILE * channel = fopen(channelname , "r");
+    char textjson[1000000];
+    int n = 0;
+    while((textjson[n++] = getc(channel)) != EOF);
+    textjson[n] = 0;
+    fclose(channel);
+    char string[500];
+    cJSON * new = cJSON_Parse(textjson);
+    cJSON * members = cJSON_GetObjectItem(new , "members");
+    for(int i = 0 ; i < cJSON_GetArraySize(members) ; i++){
+        if(strcmp(username , cJSON_GetArrayItem(members , i) -> valuestring) == 0){
+            strcpy(string , username);
+            strcat(string , " are in this channel\n");
+            printf("%s\n",string);
+            send(client_socket , string , sizeof(string) , 0);
+            return;
+        }
+    }
+    strcpy(string , username);
+    strcat(string , " are not in this channel\n");
+    printf("string2 : %s",string);
+    send(client_socket , string , sizeof(string) , 0);
+}
+void client_find_message(){
+    char clientsearchmessage[100000];
+    char channelname[100];
+    char clientname[100];
+    strcpy(clientsearchmessage , buffer + 13);
+    printf("buffer search(message) : %s\n",buffer);
+    printf("buffers client search message:%s\n",clientsearchmessage);
+    char token[22];
+    int size = strlen(clientsearchmessage) - 1;
+    printf("size : %d\n",size);
+    int j = 0;
+    for(int i = 21 ; i >= 0 ; i--){
+        if(i <= 19){
+            token[j] = clientsearchmessage[size - 1 - i];
+            j++;
+        }
+        clientsearchmessage[size - 1 - i] = 0;
+    }
+    printf("client search message: %s\n",clientsearchmessage);
+    for(int i = 0 ; i < registeredusers ; i++){
+        if(strncmp(token , clients[i].token , 20) == 0){
+            strcpy(channelname , clients[i].channelname);
+            strcpy(clientname , clients[i].name);
+            break;
+        }
+    }
+    FILE* channel = fopen(channelname, "r");
+    char textjson[100000];
+    int n = 0;
+    while((textjson[n++] = getc(channel)) != EOF);
+    textjson[n] = 0;
+    fclose(channel);
+    cJSON * new = cJSON_Parse(textjson);
+    cJSON * oldmessage = cJSON_GetObjectItem(new , "messages");
+    cJSON * Client = cJSON_CreateObject();
+    cJSON_AddStringToObject(Client , "type" , "List");
+    cJSON * messages = cJSON_AddArrayToObject(Client , "content");
+    for(int i = 0 ; i < cJSON_GetArraySize(oldmessage) ; i++){
+        cJSON * mycontent = cJSON_GetArrayItem(oldmessage , i);
+        printf("sender : %s\n" , cJSON_GetObjectItem(mycontent , "sender") -> valuestring);
+        printf("message : %s\n" , cJSON_GetObjectItem(mycontent , "content") -> valuestring);
+        for(int j = 0 ; j < strlen(cJSON_GetObjectItem(mycontent , "content") -> valuestring) ; j++){
+            if(strncmp(clientsearchmessage , j + cJSON_GetObjectItem(mycontent , "content") -> valuestring , strlen(clientsearchmessage)) == 0) {
+                cJSON *sender = cJSON_CreateObject();
+                cJSON_AddItemToArray(messages, sender);
+                cJSON_AddStringToObject(sender, "sender", cJSON_GetObjectItem(mycontent, "sender")->valuestring);
+                cJSON_AddStringToObject(sender, "content", cJSON_GetObjectItem(mycontent, "content")->valuestring);
+                break;
+            }
+        }
+    }
+    char* string;
+    string = cJSON_Print(Client);
+    printf("last (send) search string : %s\n",string);
+    send(client_socket , string , strlen(string) , 0);
+}
 int main(){
     struct sockaddr_in server, client;
     WORD wVersionRequested;
@@ -589,62 +695,57 @@ int main(){
     }
     else
         printf("Socket successfully bound..\n");
-
     // Now server is ready to listen and verify
-
     while(1) {
         connecttoclient();
         memset(buffer , 0 , strlen(buffer));
         recv(client_socket , buffer , sizeof(buffer) , 0);
         printf("main buffer : %s\n",buffer);
-
         ///TODO recive from client
         char checkstring[50];
-        //printf("main func: %s\n",checkstring);
         sscanf(buffer, "%s", checkstring);
         if (strcmp(checkstring, "register") == 0) {
             Clientregister();
-            //closesocket(server_socket);
             closesocket(client_socket);
         }
         else if (strcmp(checkstring, "login") == 0) {
             Clientlogin();
-            //closesocket(server_socket);
             closesocket(client_socket);
         }
         else if (strcmp(checkstring, "create") == 0) {
             clientCreateChannel();
-            //closesocket(server_socket);
             closesocket(client_socket);
         }
         else if (strcmp(checkstring, "join") == 0) {
             clientjoinchannel();
-            //closesocket(server_socket);
             closesocket(client_socket);
         }
         else if(strcmp(checkstring, "send") == 0){
             sendmessage();
-            //closesocket(server_socket);
             closesocket(client_socket);
         }
         else if(strcmp(checkstring , "refresh") == 0){
             clientrefreh();
-            //closesocket(server_socket);
             closesocket(client_socket);
         }
         else if(strcmp(checkstring , "channel") == 0){
             channelmembers();
-            //closesocket(server_socket);
             closesocket(client_socket);
         }
         else if(strcmp(checkstring , "leave") == 0){
             clientleave();
-            //closesocket(server_socket);
             closesocket(client_socket);
         }
         else if(strcmp(checkstring , "logout") == 0){
             clientlogout();
-            //closesocket(server_socket);
+            closesocket(client_socket);
+        }
+        else if(strcmp(checkstring , "find_user") == 0){
+            client_find_user();
+            closesocket(client_socket);
+        }
+        else if(strcmp(checkstring , "find_message") == 0){
+            client_find_message();
             closesocket(client_socket);
         }
         memset(buffer, 0, sizeof(buffer));
